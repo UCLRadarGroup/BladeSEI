@@ -44,13 +44,10 @@ from collections import defaultdict
 import warnings
 from .augmentations import DegradeToSNR, AddMagnitude, NormaliseByPeakMagnitude, FrequencyShift, PhaseShift, Flatten
     
-
-
-
 class SimplePulseDatasetPyTorch(Dataset):
     """
     PyTorch Dataset for loading simple preprocessed HDF5 radar pulse data.
- 
+
     Features:
     - Load from directory of HDF5 chunks (variable number of pulses per chunk)
     - Filter by day, environment, temp, emitter, or waveform
@@ -61,12 +58,12 @@ class SimplePulseDatasetPyTorch(Dataset):
       metadata alongside each pulse (return_pdw / return_metadata)
     - Ability to return stacked pulses aligned by time-of-arrival in
       "contrastive" mode. Enabling multi-view training from multiple ADCs.
- 
+
     ADCs are always selected with adc_names=[...] (at least one), and pulses are always aligned by
     time-of-arrival, using the fixed TOA_FIELD and TOA_TOLERANCE constants (see module
     docstring for the matching algorithm and why TOA is used instead of
     position). There is no separate ADC filter. A single ADC is just a one-element list.
- 
+
     `adc_mode` controls what __getitem__ hands back for each matched group:
         adc_mode="contrastive": __getitem__ returns the full stack,
             pulse shape (n_adc, len(iq), 2), one row per adc_names entry -
@@ -78,16 +75,16 @@ class SimplePulseDatasetPyTorch(Dataset):
             len(adc_names); labels gain an 'adc' key so you can tell which ADC
             a given item came from.
     """
- 
+
     TOA_FIELD = "time_of_arrival"   # fixed - not a constructor parameter, alignment always uses this field
     TOA_TOLERANCE = 2e-6            # fixed - max |toa_a - toa_b| for two ADC readings to count as the same pulse
     SNR_FIELD = "snr"               # fixed - pulse_descriptor_words field checked against SNR_THRESHOLD_DB
     SNR_THRESHOLD_DB = 31           # fixed - a matched group is dropped entirely if ANY ADC's view is below this
- 
+
     def __init__(
         self,
         hdf5_dir: str,
- 
+
         day_filter: Optional[List[str]] = None,
         environment_filter: Optional[List[str]] = None,
         temp_filter: Optional[List[str]] = None,
@@ -95,10 +92,10 @@ class SimplePulseDatasetPyTorch(Dataset):
         waveform_filter: Optional[List[str]] = None,
         adc_names: Optional[List[str]] = None,
         adc_mode: Literal["single", "contrastive"] = "single",
- 
+
         load_to_memory: bool = False,
         max_pulses_per_emitter: Optional[int] = None,
- 
+
         return_pdw: bool = False,
         return_metadata: bool = False,
     ):
@@ -120,16 +117,18 @@ class SimplePulseDatasetPyTorch(Dataset):
             max_pulses_per_emitter: Limit number of pulses used from each emitter/adc.
             return_pdw/medata: Return pulse descriptor words (ToA, power, freq, etc)
                 or collect meta-data (RFSoC parameters), source file for pulse.
- 
+
         """
- 
+
+        if not TORCH_AVAILABLE:
+            raise ImportError("PyTorch is required for SimplePulseDatasetPyTorch")
         if adc_mode not in ("single", "contrastive"):
             raise ValueError(f"adc_mode must be 'single' or 'contrastive', got {adc_mode!r}")
         if not adc_names:
             raise ValueError("adc_names is required: pass at least one ADC, e.g. adc_names=['adc0']")
- 
+
         self.hdf5_dir = Path(hdf5_dir)
- 
+
         self.day_filter = set(day_filter) if day_filter else None
         self.environment_filter = set(environment_filter) if environment_filter else None
         self.temp_filter = set(temp_filter) if temp_filter else None
@@ -138,36 +137,36 @@ class SimplePulseDatasetPyTorch(Dataset):
         self.adc_names = list(adc_names)
         self.multi_adc = True       # always: kept because AugmentedPulseDataset reads it from its base
         self.adc_mode = adc_mode
- 
+
         self.load_to_memory = load_to_memory
         self.max_pulses_per_emitter = max_pulses_per_emitter
- 
+
         self.return_pdw = return_pdw
         self.return_metadata = return_metadata
- 
+
         self.hdf5_files = sorted(self.hdf5_dir.rglob('*.h5'))
         if len(self.hdf5_files) == 0:
             raise ValueError(f"No .h5 files found in {hdf5_dir}")
- 
+
         self.metadata: Optional[Dict[str, Any]] = None
         if self.return_metadata:
             with h5py.File(self.hdf5_files[0], 'r') as f:
                 self.metadata = self._read_metadata(f)
- 
+
         self._build_multi_adc_index_by_toa(max_pulses_per_emitter)
- 
+
         if self.load_to_memory:
             self._load_to_memory()
- 
+
     @staticmethod
     def _decode_attr(x):
         return x.decode() if isinstance(x, bytes) else x
- 
+
     @classmethod
     def _read_metadata(cls, f: h5py.File) -> Dict[str, Any]:
         """Generic read of every attribute under /metadata."""
         return {key: cls._decode_attr(value) for key, value in f["metadata"].attrs.items()}
- 
+
     @classmethod
     def _read_pdw_row(cls, f: h5py.File, pulse_idx: int) -> Dict[str, Any]:
         """Generic read of every field under /pulse_descriptor_words for one pulse."""
@@ -176,7 +175,7 @@ class SimplePulseDatasetPyTorch(Dataset):
         for name, dataset in pdw_grp.items():
             row[name] = dataset[pulse_idx] if pulse_idx < dataset.shape[0] else None
         return row
- 
+
     @staticmethod
     def _read_pdw_columns(f: h5py.File, fields: List[str]) -> Dict[str, Optional[np.ndarray]]:
         """
@@ -186,7 +185,7 @@ class SimplePulseDatasetPyTorch(Dataset):
         for name in fields:
             out[name] = pdw_grp[name][:] if name in pdw_grp else None
         return out
- 
+
     @classmethod
     def _read_labels(cls, f: h5py.File) -> Dict[str, str]:
         labels_grp = f["labels"]
@@ -197,7 +196,7 @@ class SimplePulseDatasetPyTorch(Dataset):
             "emitter": cls._decode_attr(labels_grp.attrs["emitter"]),
             "pulse_type": cls._decode_attr(labels_grp.attrs["pulse_type"]),
         }
- 
+
     def _passes_label_filters(self, labels: Dict[str, str]) -> bool:
         if self.day_filter and labels["day"] not in self.day_filter:
             return False
@@ -210,7 +209,7 @@ class SimplePulseDatasetPyTorch(Dataset):
         if self.waveform_filter and labels["pulse_type"] not in self.waveform_filter:
             return False
         return True
- 
+
     def _scan_adc_files(self, need_columns: Optional[List[str]] = None):
         """
         Shared first pass for the multi-ADC index builder: walk every HDF5 file, work out
@@ -226,38 +225,38 @@ class SimplePulseDatasetPyTorch(Dataset):
         per_adc: Dict[str, Dict[Tuple, List[dict]]] = {adc: defaultdict(list) for adc in self.adc_names}
         acq_labels: Dict[Tuple, Dict[str, str]] = {}
         seen_identifiers = set()
- 
+
         for file_idx, filepath in enumerate(self.hdf5_files):
             try:
                 with h5py.File(filepath, 'r') as f:
                     source_file = self._decode_attr(f["metadata"].attrs["source_file"])
                     candidates = {Path(source_file).stem.lower(), filepath.stem.lower()}
                     seen_identifiers.update(candidates)
- 
+
                     matched = candidates & adc_set_lower
                     if not matched:
                         continue
                     adc = next(a for a in self.adc_names if a.lower() in matched)
- 
+
                     labels = self._read_labels(f)
                     if not self._passes_label_filters(labels):
                         continue
- 
+
                     acq_key = (labels["day"], labels["environment"], labels["temp"],
                                labels["emitter"], labels["pulse_type"])
                     acq_labels[acq_key] = labels
- 
+
                     entry = {"file_idx": file_idx, "n_pulses": f['pulses'].shape[0]}
                     if need_columns:
                         entry["columns"] = self._read_pdw_columns(f, need_columns)
                     per_adc[adc][acq_key].append(entry)
- 
+
             except Exception as e:
                 warnings.warn(f"Error reading {filepath.name}: {e}")
                 continue
- 
+
         return per_adc, acq_labels, seen_identifiers
- 
+
     def _raise_if_missing_or_disjoint(self, per_adc, seen_identifiers):
         missing = [adc for adc in self.adc_names if not per_adc[adc]]
         if missing:
@@ -270,7 +269,7 @@ class SimplePulseDatasetPyTorch(Dataset):
                 f"Check adc_names against these, and that day/environment/temp/blade/waveform "
                 f"filters aren't excluding every file for that ADC."
             )
- 
+
         common_keys = set.intersection(*(set(per_adc[adc].keys()) for adc in self.adc_names))
         if not common_keys:
             raise ValueError(
@@ -280,17 +279,17 @@ class SimplePulseDatasetPyTorch(Dataset):
                 f"{ {adc: sorted(per_adc[adc].keys()) for adc in self.adc_names} }"
             )
         return common_keys
- 
+
     def _build_multi_adc_index_by_toa(self, max_pulses_per_emitter: Optional[int] = None):
         """
         TOA-based alignment. 
         Index over physical pulses, matched across self.adc_names by nearest time-of-arrival 
         rather than by position. This is because pulse_ids may become misaligned if one ADC
         drops a pulse.
- 
+
         self.pulse_index is a list of dicts:
             {"labels": {...}, adc0: (file_idx, pulse_idx), adc1: (...), ...}
- 
+
         Matching algorithm, per (day, environment, temp, emitter, pulse_type) acquisition:
           1. Sort every ADC's pulses (across however many files/chunks make up that ADC's
              recording of this acquisition) by TOA_FIELD, ascending.
@@ -311,7 +310,7 @@ class SimplePulseDatasetPyTorch(Dataset):
         """
         need_columns = [self.TOA_FIELD, self.SNR_FIELD]
         per_adc_files, acq_labels, seen_identifiers = self._scan_adc_files(need_columns=need_columns)
- 
+
         # Expand file-level entries into flat per-pulse dicts per (adc, acq_key).
         per_adc: Dict[str, Dict[Tuple, List[dict]]] = {adc: defaultdict(list) for adc in self.adc_names}
         for adc, by_key in per_adc_files.items():
@@ -326,36 +325,26 @@ class SimplePulseDatasetPyTorch(Dataset):
                             "toa": float(toa_col[pulse_idx]),
                             "snr": float(snr_col[pulse_idx]),
                         })
- 
+
         common_keys = self._raise_if_missing_or_disjoint(per_adc, seen_identifiers)
- 
+
         self.pulse_index = []
-        self.alignment_stats = {}
- 
+        n_no_match = n_low_snr = 0
+
         for key in sorted(common_keys):
             for adc in self.adc_names:
                 per_adc[adc][key].sort(key=lambda p: p["toa"])
- 
+
             counts = {adc: len(per_adc[adc][key]) for adc in self.adc_names}
- 
-            if len(set(counts.values())) > 1:
-                warnings.warn(
-                    f"Pulse count mismatch across ADCs for {key}: {counts}. "
-                    f"TOA alignment will match what it can within TOA_TOLERANCE="
-                    f"{self.TOA_TOLERANCE} and drop the rest - see alignment_stats[{key}] "
-                    f"for exact matched/dropped counts once the index is built."
-                )
- 
+
             base_adc = min(counts, key=counts.get)
             other_adcs = [a for a in self.adc_names if a != base_adc]
- 
+
             toa_arrays = {adc: [p["toa"] for p in per_adc[adc][key]] for adc in other_adcs}
             used = {adc: [False] * counts[adc] for adc in other_adcs}
- 
+
             matched_groups = []
-            n_dropped_no_match = 0
-            n_dropped_low_snr = 0
- 
+
             for base_pulse in per_adc[base_adc][key]:
                 base_toa = base_pulse["toa"]
                 group = {base_adc: base_pulse}
@@ -375,54 +364,39 @@ class SimplePulseDatasetPyTorch(Dataset):
                     group[adc] = per_adc[adc][key][best_j]
                     used[adc][best_j] = True
                 if not ok:
-                    n_dropped_no_match += 1
+                    n_no_match += 1
                     continue
- 
+
                 if any(group[a]["snr"] < self.SNR_THRESHOLD_DB for a in self.adc_names):
-                    n_dropped_low_snr += 1
+                    n_low_snr += 1
                     continue
- 
+
                 matched_groups.append(group)
- 
+
             if max_pulses_per_emitter is not None:
                 matched_groups = matched_groups[:max_pulses_per_emitter]
- 
+
             labels = acq_labels[key]
             for group in matched_groups:
                 self.pulse_index.append({
                     "labels": labels,
                     **{adc: (group[adc]["file_idx"], group[adc]["pulse_idx"]) for adc in self.adc_names},
                 })
- 
-            self.alignment_stats[key] = {
-                "counts": counts,
-                "base_adc": base_adc,
-                "matched": len(matched_groups),
-                "dropped_no_toa_match": n_dropped_no_match,
-                "dropped_low_snr": n_dropped_low_snr,
-            }
- 
-        total_dropped_no_match = sum(s["dropped_no_toa_match"] for s in self.alignment_stats.values())
-        total_dropped_low_snr = sum(s["dropped_low_snr"] for s in self.alignment_stats.values())
-        print(
-            f"Dataset initialized: {len(self.pulse_index)} pulse-groups x {len(self.adc_names)} ADCs "
-            f"from {len(self.hdf5_files)} HDF5 files (aligned by time_of_arrival, "
-            f"tolerance={self.TOA_TOLERANCE}, {total_dropped_no_match} pulses dropped for lack of a "
-            f"cross-ADC match within tolerance, {total_dropped_low_snr} groups dropped for an ADC's "
-            f"SNR being below {self.SNR_THRESHOLD_DB}dB)"
-        )
- 
+
+        print(f"Dataset: {len(self.pulse_index)} groups x {len(self.adc_names)} ADCs "
+              f"({n_no_match} unmatched, {n_low_snr} below {self.SNR_THRESHOLD_DB} dB dropped)")
+
     def _load_to_memory(self):
         """Load all filtered pulses (and pdw rows, if requested) into memory."""
         print("Loading all data to memory...")
- 
+
         cache: Dict[Tuple[int, int], Tuple[Any, Any]] = {}
         by_file: Dict[int, set] = defaultdict(set)
- 
+
         for entry in self.pulse_index:
             for adc in self.adc_names:
                 by_file[entry[adc][0]].add(entry[adc][1])
- 
+
         for file_idx, pulse_idxs in by_file.items():
             filepath = self.hdf5_files[file_idx]
             with h5py.File(filepath, 'r') as f:
@@ -430,16 +404,16 @@ class SimplePulseDatasetPyTorch(Dataset):
                     pulse = torch.from_numpy(f['pulses'][pulse_idx])
                     pdw = self._read_pdw_row(f, pulse_idx) if self.return_pdw else None
                     cache[(file_idx, pulse_idx)] = (pulse, pdw)
- 
+
         self._mem = [{adc: cache[entry[adc]] for adc in self.adc_names} for entry in self.pulse_index]
- 
+
         print(f"Loaded {len(self.pulse_index)} entries to memory")
- 
+
     def __len__(self) -> int:
         if self.adc_mode == "single":
             return len(self.pulse_index) * len(self.adc_names)
         return len(self.pulse_index)
- 
+
     def __getitem__(self, idx: int):
         """
         adc_mode="contrastive" returns:
@@ -447,7 +421,7 @@ class SimplePulseDatasetPyTorch(Dataset):
                     each row an independent digitisation of the SAME physical pulse
             labels: dict (no 'source_file' - ambiguous across ADCs)
             pdw:    (only if return_pdw=True) list of n_adc pdw dicts, in adc_names order
- 
+
         adc_mode="single" (default) returns ONE ADC's view per call:
             pulse:  (len(iq), 2) tensor [I, Q]
             labels: dict with 'day', 'environment', 'temp', 'emitter', 'pulse_type', plus an
@@ -459,20 +433,20 @@ class SimplePulseDatasetPyTorch(Dataset):
             group_idx, adc_idx = idx // n_adc, idx % n_adc
             adc = self.adc_names[adc_idx]
             entry = self.pulse_index[group_idx]
- 
+
             if self.load_to_memory:
                 pulse, pdw = self._mem[group_idx][adc]
             else:
                 file_idx, pulse_idx = entry[adc]
                 pulse, pdw = self._read_one(self.hdf5_files[file_idx], pulse_idx)
- 
+
             pulse = pulse.reshape(-1, 2)
             labels = {**entry["labels"], "adc": adc}
             output = (pulse, labels)
             if self.return_pdw:
                 output = output + (pdw,)
             return output
- 
+
         # adc_mode == "contrastive"
         entry = self.pulse_index[idx]
         views = self._mem[idx] if self.load_to_memory else {
@@ -485,14 +459,12 @@ class SimplePulseDatasetPyTorch(Dataset):
             pdws = [views[adc][1] for adc in self.adc_names]
             output = output + (pdws,)
         return output
- 
+
     def _read_one(self, filepath: Path, pulse_idx: int):
         with h5py.File(filepath, 'r') as f:
             pulse = torch.from_numpy(f['pulses'][pulse_idx])
             pdw = self._read_pdw_row(f, pulse_idx) if self.return_pdw else None
         return pulse, pdw
-
-
 
 class AugmentedPulseDataset(Dataset):
     """
