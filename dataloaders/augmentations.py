@@ -181,22 +181,20 @@ class AddMagnitude:
 
 class NormaliseByPeakMagnitude:
     """
-    Input:  (3, length)  - [I, Q, mag]
-    Output: (3, length)  - [I/peak_mag, Q/peak_mag, mag/peak_mag]
+    Input:  (3, length)  - [I, Q, mag]; the peak is read from the mag channel
+            or any tensor, if `peak` is passed explicitly (e.g. I/Q only, no mag channel)
+    Output: input / peak
     """
 
-    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
-        peak = tensor[2].abs().max()
+    def __call__(self, tensor: torch.Tensor, peak=None) -> torch.Tensor:
+        if peak is None:
+            peak = tensor[2].abs().max()
 
         if not torch.isfinite(peak):
-            raise ValueError(
-                f"Non-finite peak magnitude: {peak}"
-            )
+            raise ValueError(f"Non-finite peak magnitude: {peak}")
 
         if peak <= 1e-12:
-            raise ValueError(
-                "Zero/near-zero magnitude pulse encountered"
-            )
+            raise ValueError("Zero/near-zero magnitude pulse encountered")
 
         return tensor / peak
         
