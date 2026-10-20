@@ -94,7 +94,7 @@ conda activate RSEI
 pip install jupyter
 ```
 
-**Option 2: pip.** Install PyTorch for your platform by following [pytorch.org](https://pytorch.org/get-started/locally/), then:
+**Option 2: pip.** Install packages using requirements.txt file.
 
 ```bash
 pip install -r requirements.txt
