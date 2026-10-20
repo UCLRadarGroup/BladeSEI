@@ -72,7 +72,7 @@ BladeSEI/
 │   └── inception.py           Inception1DNet
 ├── dataloader_demo.ipynb      How to use the dataloaders
 ├── pca_demo.ipynb             Train and validate a PCA + kNN classifier
-├── dnn_demo.ipynb             Train and validate a ResNet classifier
+├── dnn_demo.ipynb             Train and validate a ResNet (or Inception) based classifier
 ├── requirements.txt           Pinned package versions (Linux, CUDA 12)
 ├── rsei_env.yml               Conda environment (Python 3.10)
 ├── LICENSE
