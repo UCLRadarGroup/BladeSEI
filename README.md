@@ -28,7 +28,8 @@ This repository contains the code for working with the dataset: dataloaders that
 
 ### Where to download
 
-**TODO: add the download link / DOI here.**
+[The data can be downloaded from the UCL Research Data Repository by clicking this link](https://doi.org/10.5522/04/34755795
+)
 
 Download the data and extract it into a `data/` folder in the repository root.
 
