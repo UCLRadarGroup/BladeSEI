@@ -121,10 +121,13 @@ If you use BladeSEI, please cite:
 
 ```bibtex
 @misc{bladesei,
-  title  = {TODO},
-  author = {TODO},
-  year   = {TODO},
-  url    = {https://github.com/UCLRadarGroup/BladeSEI}
+      title={BladeSEI: A Multi-Channel and Multi-Day Dataset for Robust Specific Emitter Identification of Radars}, 
+      author={Ryan White and Robert Jones and Hassan Habib and Matthew A. Ritchie and Victoria Nockles and Adam Hosford},
+      year={2026},
+      eprint={2611.18460},
+      archivePrefix={arXiv},
+      primaryClass={eess.SP},
+      url={https://arxiv.org/abs/2611.18460}, 
 }
 ```
 
